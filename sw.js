@@ -1,5 +1,5 @@
 // からだログ サービスワーカー（オフライン起動用）
-const CACHE = 'karada-log-meal-status-v2';
+const CACHE = 'karada-log-sheet-sync-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -25,6 +25,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // GAS の認証・フレーム応答はキャッシュもオフライン代替も行わない。
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) => {
       if (hit) return hit;

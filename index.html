@@ -182,6 +182,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
 /* 設定 */
 .about-p{font-size:13.5px;margin-bottom:8px}
+.sync-card{border-top:4px solid var(--blue)}
+.sync-check{display:flex!important;align-items:center;gap:10px;color:var(--ink)!important;margin:12px 0!important}
+.sync-check input{width:24px;min-height:24px;flex:none;accent-color:var(--green)}
+.sync-state{padding:10px 12px;background:var(--blue-soft);border-radius:10px;overflow-wrap:anywhere;font-size:13px}
+.sync-id{display:block;overflow-wrap:anywhere;user-select:all;font-size:12px}
 
 /* トースト・モーダル */
 .toast{position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(8px);background:#2B3440;color:#fff;padding:10px 18px;border-radius:999px;font-size:13px;font-weight:700;opacity:0;pointer-events:none;transition:.25s;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;text-align:center}
@@ -504,7 +509,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
     <div class="card">
       <h2 class="card-title"><span class="dot dot-gold"></span>記録をAIでふりかえる</h2>
       <p class="ai-desc" id="aiDesc">直近7日の記録から、ふりかえり用の文章を作ります。</p>
-      <p class="connection-note"><strong>クラウド同期：未接続</strong><br>このアプリからGensparkへの送信や自動実行はしません。内容を確認してコピーし、ご自身でGensparkに貼り付けてください。</p>
+      <p class="connection-note"><strong>AI分析は手動コピーです</strong><br>スプレッドシート同期とは別の機能です。このアプリからGensparkへの送信や自動実行はしません。内容を確認してコピーし、ご自身でGensparkに貼り付けてください。</p>
       <label class="field-label" for="promptPreview">コピーする文章（直近7日）</label>
       <textarea class="prompt-preview" id="promptPreview" readonly spellcheck="false" aria-describedby="promptPrivacy"></textarea>
       <p class="hint" id="promptPrivacy">食事名・体重などを含みます。共有してよい内容か確認してください。コピーできない場合は、この欄を長押しして選択できます。</p>
@@ -555,6 +560,29 @@ button:disabled{opacity:.55;cursor:not-allowed}
         <button class="btn btn-ghost btn-block" type="button" id="sheetOpenBtn" disabled>保存したシートを開く（別画面）</button>
       </div>
       <p class="hint" id="sheetStatus" role="status"></p>
+    </form>
+
+    <form id="syncForm" class="card form-card sync-card" autocomplete="off">
+      <h2 class="card-title"><span class="dot dot-blue"></span>記録をスプレッドシートへ同期</h2>
+      <p class="hint">この端末の食事・運動・体重を正本として送信します。シートからの読み込み・複数端末の統合はしません。手入力の行は所有しません。</p>
+      <label for="syncEndpoint" class="field-label">GAS ウェブアプリの公開URL（/exec）</label>
+      <input type="url" id="syncEndpoint" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false" maxlength="2048">
+      <label for="syncSecret" class="field-label">自分で設定した同期用の秘密鍵</label>
+      <input type="password" id="syncSecret" autocomplete="new-password" spellcheck="false" maxlength="512" aria-describedby="syncPrivacy">
+      <p class="hint" id="syncPrivacy">鍵はこのブラウザの専用領域にのみ保存し、バックアップ・URL・AI用文章には含めません。共有端末では使用しないでください。</p>
+      <label class="sync-check"><input type="checkbox" id="syncDelete">アプリで削除した同期済み行の削除を許可する</label>
+      <label class="sync-check"><input type="checkbox" id="syncAuto">記録の変更時・オンライン復帰時に自動同期する</label>
+      <p class="hint">初回はGAS側で端末IDを登録し、削除を許可する場合はサーバー側でも明示的に有効化してください。</p>
+      <span class="field-label">この端末ID（GAS の CLIENT_ID に設定）</span><code class="sync-id" id="syncClientId"></code>
+      <div class="btn-stack" style="margin-top:12px">
+        <button class="btn btn-primary btn-block" type="submit">同期設定を保存</button>
+        <button class="btn btn-ghost btn-block" type="button" id="syncNow">今すぐ同期／未確認の操作を再試行</button>
+        <button class="btn btn-danger-soft btn-block" type="button" id="syncEmpty">空の記録を同期（全同期行を削除）</button>
+        <button class="btn btn-ghost btn-block" type="button" id="syncForget">秘密鍵をこのブラウザから消去</button>
+      </div>
+      <p id="syncStatus" class="sync-state" role="status" aria-live="polite"></p>
+      <p class="hint" id="syncLast"></p>
+      <p class="hint">応答が確認できなければ成功にはしません。タイムアウト後もシートに反映済みの場合があります。同じ操作の再試行で確認します。設定だけの変更では記録を送り直しません。</p>
     </form>
 
     <div class="card">
@@ -639,7 +667,7 @@ function load(){
 }
 function save(){
   if(DEMO)return;
-  try{localStorage.setItem(LS_KEY,JSON.stringify(DB))}
+  try{localStorage.setItem(LS_KEY,JSON.stringify(DB));if(sheetSync)sheetSync.changed()}
   catch(e){toast('保存に失敗しました（ストレージ空き容量をご確認ください）')}
 }
 
@@ -1073,7 +1101,7 @@ function validSheetUrl(value){
 function fillSheetForm(){
   const url=validSheetUrl(DB.settings.sheetUrl||'')||'';
   $('#sheetUrl').value=url;$('#sheetOpenBtn').disabled=!url;
-  $('#sheetStatus').textContent=url?'リンクを保存済み・同期は未接続':'リンクは未設定・同期は未接続';
+  $('#sheetStatus').textContent=url?'参照リンクを保存済み（同期設定とは独立）':'参照リンクは未設定（同期設定とは独立）';
 }
 function validateImport(p){
   const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -1082,7 +1110,7 @@ function validateImport(p){
   if(!object(p)||!['meals','weights','exercises'].every(k=>Array.isArray(p[k])&&p[k].length<=50000))throw new Error();
   const ids=new Set(),mealSlots=new Map();
   for(const k of ['meals','weights','exercises'])for(const r of p[k]){
-    if(!object(r)||typeof r.id!=='string'||!r.id.length||r.id.length>200||ids.has(r.id)||!date(r.date)||(r.at!==undefined&&!num(r.at,0,Number.MAX_SAFE_INTEGER)))throw new Error();
+    if(!object(r)||typeof r.id!=='string'||!r.id.length||r.id.length>200||ids.has(r.id)||!date(r.date)||(r.at!==undefined&&!num(r.at,0,8640000000000000))||(r.memo!==undefined&&(typeof r.memo!=='string'||r.memo.length>2000)))throw new Error();
     ids.add(r.id);
     if(k==='weights'){if(!num(r.kg,20,300))throw new Error()}
     else{
@@ -1113,9 +1141,12 @@ function validateImport(p){
   }
   const settings={...DEFAULT_SETTINGS};
   for(const k of ['name','heightCm','targetWeight','startWeight','kcalTarget','reminders'])if(s[k]!==undefined)settings[k]=s[k];
+  if(s.reminders){settings.reminders={};for(const k of ['morning','noon','evening'])if(s.reminders[k])settings.reminders[k]={on:s.reminders[k].on,time:s.reminders[k].time}}
   if(s.sheetUrl)settings.sheetUrl=validSheetUrl(s.sheetUrl);
-  const meals=p.meals.map(r=>({...r,status:mealStatus(r),...(mealStatus(r)==='skipped'?{name:'食べなかった',kcal:0}:{})}));
-  return {settings,weights:p.weights,meals,exercises:p.exercises};
+  // 未知のキー（秘密鍵など）は取り込まない。バックアップの同期資格情報は信用しない。
+  const clean=(r,keys)=>Object.fromEntries(keys.filter(k=>r[k]!==undefined).map(k=>[k,r[k]]));
+  const meals=p.meals.map(r=>({...clean(r,['id','date','slot','name','kcal','at','memo']),status:mealStatus(r),...(mealStatus(r)==='skipped'?{name:'食べなかった',kcal:0}:{})}));
+  return {settings,weights:p.weights.map(r=>clean(r,['id','date','kg','at','memo'])),meals,exercises:p.exercises.map(r=>clean(r,['id','date','name','minutes','kcal','at','memo']))};
 }
 function fillSettingsForm(){
   const s=DB.settings;
@@ -1149,7 +1180,7 @@ function bindSettings(){
   });
   $('#exportBtn').addEventListener('click',()=>{
     const a=document.createElement('a');
-    a.href=URL.createObjectURL(new Blob([JSON.stringify(DB,null,2)],{type:'application/json'}));
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(validateImport(DB),null,2)],{type:'application/json'}));
     a.download='karada-log-backup-'+todayStr()+'.json';
     a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),1000);
@@ -1173,12 +1204,12 @@ function bindSettings(){
   });
   $('#demoBtn').addEventListener('click',()=>{
     confirmModal('デモデータを現在のデータに上書きします。よろしいですか？',()=>{
-      DB=demoData();save();fillSettingsForm();fillRemindersForm();renderAll();switchTab('home');toast('デモデータを表示しました');
+      sheetSync.pause();DB=demoData();save();fillSettingsForm();fillRemindersForm();renderAll();switchTab('home');toast('デモデータを表示しました。自動同期は停止しました');
     });
   });
   $('#clearBtn').addEventListener('click',()=>{
     confirmModal('すべての記録と設定を削除します。元に戻せません。よろしいですか？',()=>{
-      DB={settings:{...DEFAULT_SETTINGS},weights:[],meals:[],exercises:[]};
+      sheetSync.pause();DB={settings:{...DEFAULT_SETTINGS},weights:[],meals:[],exercises:[]};
       save();fillSettingsForm();fillRemindersForm();renderAll();toast('すべて削除しました');
     });
   });
@@ -1340,10 +1371,144 @@ function registerSW(){
   }
 }
 
+/* ===== 単一端末・正本スナップショット同期（秘密鍵はDBの外） ===== */
+let sheetSync=null;
+const SYNC_PROTOCOL='karada-sheet-v1';
+const SYNC_META='karada-sheet-meta-v1',SYNC_AUTH='karada-sheet-auth-v1';
+function randomSyncId(){return Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('')}
+function syncEndpoint(value){
+  try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='script.google.com'&&!u.port&&!u.username&&!u.password&&!u.search&&!u.hash&&/^\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(u.pathname)?u.href:null}catch(e){return null}
+}
+function googleMessageOrigin(origin){
+  try{const u=new URL(origin);return u.protocol==='https:'&&!u.port&&(u.hostname==='script.google.com'||u.hostname==='script.googleusercontent.com'||/^[a-z0-9-]+-script\.googleusercontent\.com$/.test(u.hostname))}catch(e){return false}
+}
+async function syncDigest(text){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('')}
+function syncSnapshot(){
+  const data=validateImport(DB),out={};
+  for(const k of ['meals','exercises','weights'])out[k]=data[k].map(r=>{
+    const keys={meals:['id','date','slot','name','kcal','at','memo','status'],exercises:['id','date','name','minutes','kcal','at','memo'],weights:['id','date','kg','at','memo']}[k];
+    return Object.fromEntries(keys.map(key=>[key,r[key]??(key==='at'?0:key==='status'?'eaten':'')]));
+  }).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
+  return JSON.stringify(out);
+}
+// HtmlService は Google の外側フレームの内側にも iframe を作る。
+// source を無視せず、リクエスト専用フレームの直下に限って照合する。
+function syncFrameSource(frame,source){
+  const outer=frame.contentWindow;if(source===outer)return true;
+  try{for(let i=0;i<outer.length;i++)if(outer[i]===source)return true}catch(e){/* ブラウザが拒否したら fail closed */}
+  return false;
+}
+function postSyncForm(endpoint,payload,timeoutMs=45000){
+  return new Promise((resolve,reject)=>{
+    const frame=document.createElement('iframe'),form=document.createElement('form'),field=document.createElement('textarea');
+    frame.name='sync_'+randomSyncId();frame.title='スプレッドシート同期の応答';frame.hidden=true;
+    form.hidden=true;form.method='POST';form.action=endpoint;form.target=frame.name;form.enctype='application/x-www-form-urlencoded';
+    field.name='payload';field.value=JSON.stringify(payload);form.appendChild(field);
+    let timer;
+    const finish=(error,data)=>{clearTimeout(timer);window.removeEventListener('message',receive);form.remove();frame.remove();error?reject(error):resolve(data)};
+    const receive=e=>{
+      if(!googleMessageOrigin(e.origin)||!syncFrameSource(frame,e.source))return;
+      const d=e.data;
+      if(!d||typeof d!=='object'||Array.isArray(d)||d.protocol!==SYNC_PROTOCOL||d.nonce!==payload.nonce||d.opId!==payload.opId||d.clientId!==payload.clientId||d.revision!==payload.revision||typeof d.ok!=='boolean')return;
+      if(d.ok&&(d.digest!==payload.digest||!Number.isSafeInteger(d.count)||d.count<0))return;
+      if(!d.ok&&!(typeof d.code==='string'&&/^[A-Z_]{1,40}$/.test(d.code)))return;
+      finish(null,d);
+    };
+    window.addEventListener('message',receive);document.body.append(frame,form);
+    timer=setTimeout(()=>finish(new Error('TIMEOUT')),timeoutMs);
+    try{HTMLFormElement.prototype.submit.call(form)}catch(e){finish(new Error('TRANSPORT'))}
+  });
+}
+const SYNC_ERRORS={AUTH:'秘密鍵が一致しません。自動再試行を停止しました。',BINDING:'端末IDがGASの登録と違います。新しい端末からの上書きを拒否しました。',ORIGIN:'公開元がGASのAPP_ORIGINと違います。',STALE:'古い版を拒否しました。複数タブを閉じ、端末IDとバックアップを確認してください。',CONFLICT:'手入力・手編集と競合しました。シートの行と所有台帳を確認してください。',DELETE_DISABLED:'削除が未許可です。アプリとGASの両方で削除を許可してください。',EMPTY:'空の全件同期は専用ボタンから確認が必要です。',PENDING:'サーバーに別の未完了操作があります。元の端末・操作で再試行してください。',TIMEOUT:'応答未確認（タイムアウト）。反映済みの可能性があります。同じ操作を再試行してください。',SCHEMA:'シートの見出し・管理台帳が想定と違います。',VALIDATION:'記録の形式・件数・サイズを確認してください。',BUSY:'サーバーが処理中です。しばらくして再試行します。',SERVER:'サーバー処理を完了できませんでした。部分反映の可能性があります。同じ操作で再試行してください。'};
+class SheetSync{
+  constructor(){
+    this.busy=false;this.timer=null;this.backoff=2000;this.transport=postSyncForm;this.error='';this.blocked=false;
+    try{this.meta=JSON.parse(localStorage.getItem(SYNC_META)||'null')||{clientId:randomSyncId(),revision:1,observed:syncSnapshot(),ackedDigest:'',lastSuccess:'',pending:null};this.auth=JSON.parse(localStorage.getItem(SYNC_AUTH)||'null')||{endpoint:'',secret:'',auto:false,allowDelete:false};this.persist()}
+    catch(e){this.meta={clientId:randomSyncId(),revision:1,observed:'',pending:null};this.auth={};this.blocked=true;this.error='同期設定を保存できません。ブラウザの保存領域を確認してください。'}
+  }
+  persist(){if(!DEMO)localStorage.setItem(SYNC_META,JSON.stringify(this.meta))}
+  saveAuth(){if(!DEMO)localStorage.setItem(SYNC_AUTH,JSON.stringify(this.auth))}
+  changed(){
+    if(DEMO||this.blocked)return;
+    try{const text=syncSnapshot();if(text!==this.meta.observed){this.meta.observed=text;this.meta.revision++;this.persist();this.error='';this.render();this.schedule()}}
+    catch(e){this.error='記録の検証または同期情報の保存に失敗しました。同期を停止します。';this.blocked=true;this.render()}
+  }
+  pause(){this.auth.auto=false;this.saveAuth();clearTimeout(this.timer);this.render()}
+  schedule(delay=1500){clearTimeout(this.timer);if(!DEMO&&!this.blocked&&this.auth.auto&&this.auth.secret&&navigator.onLine!==false)this.timer=setTimeout(()=>this.run(),delay)}
+  render(){
+    $('#syncClientId').textContent=this.meta.clientId;
+    $('#syncStatus').textContent=DEMO?'デモ表示中：同期しません':this.busy?'送信中・受領確認を待っています':this.error|| (this.meta.pending?'未確認の操作あり。同じ操作を再試行してください。':this.meta.ackedRevision===this.meta.revision?'同期済み（受領確認あり）':this.auth.endpoint?'未同期の記録があります':'未接続：GASのURLと秘密鍵を設定してください');
+    $('#syncLast').textContent=this.meta.lastSuccess?'最後の受領確認：'+new Date(this.meta.lastSuccess).toLocaleString('ja-JP'):'受領確認はまだありません';
+    $('#syncNow').disabled=this.busy||DEMO;$('#syncEmpty').disabled=this.busy||DEMO;
+    $('#syncAuto').checked=!!this.auth.auto;
+  }
+  bind(){
+    $('#syncEndpoint').value=this.auth.endpoint||'';$('#syncSecret').value=this.auth.secret||'';$('#syncDelete').checked=!!this.auth.allowDelete;
+    $('#syncForm').addEventListener('submit',e=>{
+      e.preventDefault();const endpoint=syncEndpoint($('#syncEndpoint').value.trim()),secret=$('#syncSecret').value;
+      if(!endpoint||! /^[A-Za-z0-9_-]{43,512}$/.test(secret)){toast('公開 /exec URL と32バイト以上のランダム鍵（Base64URL形式）を入力してください');return}
+      if(this.busy||this.meta.pending&&(endpoint!==this.auth.endpoint||$('#syncDelete').checked!==this.auth.allowDelete)){toast('未確認操作を解決してから接続先・削除設定を変更してください');return}
+      const apply=()=>{
+        try{this.auth={endpoint,secret,auto:$('#syncAuto').checked,allowDelete:$('#syncDelete').checked};this.saveAuth();this.blocked=false;this.error='';this.render();toast('同期設定を保存しました');this.schedule()}
+        catch(e){this.error='同期設定を保存できません';this.render()}
+      };
+      if($('#syncDelete').checked&&!this.auth.allowDelete)confirmModal('この端末から消した記録をシートからも削除できるようにします。対象は以前この同期が所有した行だけです。バックアップ済みであることを確認して許可しますか？',apply);else apply();
+    });
+    $('#syncNow').onclick=()=>{this.blocked=false;this.run()};
+    $('#syncEmpty').onclick=()=>{
+      if(Object.values(JSON.parse(syncSnapshot())).some(rows=>rows.length)){toast('記録が空のときだけ使えます');return}
+      confirmModal('シート上の、この同期が所有する全記録を削除します。手入力行は残します。バックアップ済みですか？',()=>{this.blocked=false;this.run(true)});
+    };
+    $('#syncForget').onclick=()=>{this.auth.secret='';this.auth.auto=false;this.saveAuth();$('#syncSecret').value='';clearTimeout(this.timer);this.render();toast('秘密鍵を消去しました（進行中の送信は取り消せません）')};
+    window.addEventListener('online',()=>this.schedule());
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden){this.changed();this.schedule()}});
+    // 他タブからの更新は正本の取り違えを避けて停止。再読込後に続行する。
+    window.addEventListener('storage',e=>{if([LS_KEY,SYNC_META,SYNC_AUTH].includes(e.key)){this.blocked=true;clearTimeout(this.timer);this.error='別タブで変更されました。このタブを再読み込みしてください。';this.render()}});
+    this.changed();this.render();this.schedule();
+  }
+  async run(confirmEmpty=false){
+    if(this.busy||DEMO||this.blocked)return;
+    if(!syncEndpoint(this.auth.endpoint)||!this.auth.secret){this.error='先に同期URLと秘密鍵を保存してください。';this.render();return}
+    if(navigator.onLine===false){this.error='オフラインです。記録は端末に保存されています。';this.render();return}
+    this.changed();if(this.blocked)return;
+    this.busy=true;this.error='';this.render();let retry=false,again=false;
+    try{
+      // 同一プロファイルの複数タブ送信もWeb Locksで直列化する。
+      const send=async()=>{
+        if(!DEMO){const stored=JSON.parse(localStorage.getItem(SYNC_META)||'null');if(stored&&JSON.stringify(stored)!==JSON.stringify(this.meta))throw new Error('STALE')}
+        let op=this.meta.pending;
+        if(!op){
+          const text=syncSnapshot(),revision=this.meta.revision,digest=await syncDigest(text),snapshot=JSON.parse(text),count=Object.values(snapshot).reduce((n,a)=>n+a.length,0);
+          if(digest===this.meta.ackedDigest&&!confirmEmpty){this.meta.ackedRevision=revision;this.persist();return}
+          if(!count&&!confirmEmpty)throw new Error('EMPTY');
+          if(count>10000)throw new Error('VALIDATION');
+          op={opId:randomSyncId(),clientId:this.meta.clientId,revision,digest,snapshot,allowDelete:!!this.auth.allowDelete,confirmEmpty:!!confirmEmpty};
+          this.meta.pending=op;this.persist();
+        }
+        const payload={...op,protocol:SYNC_PROTOCOL,nonce:randomSyncId(),allowedOrigin:location.origin,secret:this.auth.secret};delete payload.text;
+        const encoded=JSON.stringify(payload);if(new TextEncoder().encode(encoded).length>2*1024*1024)throw new Error('VALIDATION');
+        const ack=await this.transport(this.auth.endpoint,payload);
+        if(!ack.ok){const err=new Error(ack.code);err.retain=ack.retrySame===true;throw err}
+        // 防御を重ねる。テスト用transportを差し替えても古い応答では更新しない。
+        if(ack.protocol!==SYNC_PROTOCOL||ack.nonce!==payload.nonce||ack.opId!==op.opId||ack.revision!==op.revision||ack.clientId!==op.clientId||ack.digest!==op.digest||ack.count!==Object.values(op.snapshot).reduce((n,a)=>n+a.length,0))throw new Error('ACK');
+        this.meta.ackedDigest=op.digest;this.meta.ackedRevision=op.revision;this.meta.lastSuccess=new Date().toISOString();this.meta.pending=null;this.persist();this.backoff=2000;
+        again=JSON.stringify(op.snapshot)!==this.meta.observed;
+      };
+      if(navigator.locks)await navigator.locks.request('karada-sheet-sync',send);else await send();
+    }catch(e){
+      const code=e.message;this.error=SYNC_ERRORS[code]||'受領確認が不正、または通信・保存に失敗しました。成功として記録しません。';
+      // 結果不明の操作は捨てない。確実な事前拒否だけ再設定・修正を許す。
+      if(['AUTH','BINDING','ORIGIN','STALE','CONFLICT','DELETE_DISABLED','EMPTY','SCHEMA','VALIDATION'].includes(code)){if(!e.retain)this.meta.pending=null;this.blocked=true;try{this.persist()}catch(ignore){}}
+      else retry=true;
+    }finally{this.busy=false;this.render();if(retry){this.schedule(this.backoff);this.backoff=Math.min(this.backoff*2,300000)}else if(again)this.schedule()}
+  }
+}
+
 /* ===== 全体描画・初期化 ===== */
 function renderAll(){renderHome();renderMeals();renderExercise();renderWeight();renderAnalysis()}
 function init(){
   load();
+  sheetSync=new SheetSync();sheetSync.bind();
   $('#todayLabel').textContent=jpDate(todayStr());
   $('#mDate').value=todayStr();$('#eDate').value=todayStr();$('#wDate').value=todayStr();
   fillSettingsForm();fillRemindersForm();renderPresets();
