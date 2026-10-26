@@ -1,0 +1,16 @@
+{
+  "name": "からだログ | ダイエット記録ノート",
+  "short_name": "からだログ",
+  "description": "毎日の食事・運動・体重を記録するダイエット応援アプリ",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F7F6F0",
+  "theme_color": "#3E7C5B",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
