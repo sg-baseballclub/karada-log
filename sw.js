@@ -1,5 +1,5 @@
 // からだログ サービスワーカー（オフライン起動用）
-const CACHE = 'karada-log-v1';
+const CACHE = 'karada-log-meal-status-v2';
 const ASSETS = [
   './',
   './index.html',
